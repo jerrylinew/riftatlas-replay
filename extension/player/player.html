@@ -13,6 +13,8 @@
     <span id="meta"></span>
   </div>
   <div id="fog" hidden></div>
+  <span id="saved" hidden></span>
+  <button id="save" hidden title="Keep this replay in the extension's list, to watch it in RiftAtlas' board and add marks and notes">Add to my recordings</button>
   <label id="open">
     Open replay or HAR<input type="file" id="file" accept=".json,.har" hidden>
   </label>
@@ -33,10 +35,12 @@
       <button data-tab="events" class="on" role="tab">Moves</button>
       <button data-tab="chain" role="tab">Chain</button>
       <button data-tab="chat" role="tab">Chat</button>
+      <button data-tab="marks" role="tab" id="marks-tab" title="Steps marked in replay mode, with their notes (, and . step between them)">Marks</button>
     </div>
     <ol id="events" class="pane on"></ol>
     <div id="chain" class="pane"></div>
     <div id="chat" class="pane"></div>
+    <ol id="marks" class="pane"></ol>
   </aside>
 </main>
 
@@ -44,6 +48,7 @@
   <div id="track" role="slider" aria-label="Timeline" tabindex="0">
     <div id="bands"></div>
     <div id="ticks"></div>
+    <div id="mark-ticks"></div>
     <div id="head"></div>
   </div>
   <div id="controls">

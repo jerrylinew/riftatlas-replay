@@ -8,6 +8,7 @@ header { display: flex; align-items: center; gap: 10px; }
 header strong { color: #d8b76e; letter-spacing: .05em; }
 #version { color: #5f7186; font-size: 10.5px; font-variant-numeric: tabular-nums; }
 header button { margin-left: auto; }
+header button + button { margin-left: 0; }
 button { font: inherit; color: inherit; background: #121a24; border: 1px solid #24313f;
   border-radius: 4px; padding: 3px 8px; cursor: pointer; }
 button:hover { border-color: #74efff; }
@@ -92,6 +93,8 @@ li.lost { border-left: 3px solid rgba(255, 123, 123, .5); }
   padding: 0 5px; color: #8698ab; }
 .tag.live { color: #74efff; border-color: rgba(116,239,255,.4); }
 .tag.partial { color: #ff9d6b; border-color: rgba(255,157,107,.4); }
+.tag.marks { color: #d8b76e; border-color: rgba(216,183,110,.45); }
+.tag.imported { color: #9fb0c2; }
 
 .problem { margin-top: 6px; padding: 4px 7px; border-radius: 4px; font-size: 11px;
   color: #ffb08a; background: rgba(255,157,107,.09);

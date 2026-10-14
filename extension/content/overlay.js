@@ -18,7 +18,9 @@
  * It also draws the same panel for replay mode, whose control bar has its own
  * eye button. Replay mode runs in the page's world, where the shared panel
  * cannot be loaded a second time, so it posts what to show and where, and this
- * draws it - see `replayReveals` below.
+ * draws it - see `replayReveals` below. Replay mode's marks and notes work the
+ * same way, and are saved from here, since the page's world cannot reach the
+ * extension's storage - see `drawMarks`.
  */
 (() => {
   if (window.top !== window) return;
@@ -350,6 +352,148 @@
     if (event.source !== window || event.data?.source !== TO_PANEL) return;
     replayReveals(event.data);
   });
+
+  // ── Replay mode's marks ──────────────────────────────────────────────────
+  // Steps of a replay someone marked, with their notes. Replay mode owns the
+  // buttons, keys and scrubber ticks; it cannot reach the extension's storage
+  // from the page's world, so the list is kept and saved here, drawn beside
+  // its bar like the reveals.
+
+  const TO_MARKS = 'riftatlas-replay-marks';
+  const FROM_MARKS = 'riftatlas-replay-marks-panel';
+  const TYPING = 'data-riftatlas-typing';
+  const marks = {
+    recordingId: null,
+    list: [],
+    open: false,
+    current: null,
+    last: null,
+    labels: {},
+    anchor: null,
+    error: null,
+    host: null,
+    panel: null,
+  };
+  const tellMarks = (m) => window.postMessage({ source: FROM_MARKS, ...m }, window.location.origin);
+
+  async function marksCall(message) {
+    if (!chrome.runtime?.id) throw new Error('The extension was updated or reloaded. Reload this page to keep marking.');
+    const res = await chrome.runtime.sendMessage({ recordingId: marks.recordingId, ...message });
+    if (!res?.ok) throw new Error(res?.error ?? 'Could not save the mark.');
+    return res;
+  }
+
+  /** Run a change, then show the list it left - or why it failed. */
+  async function changeMarks(message) {
+    try {
+      const res = await marksCall(message);
+      marks.error = null;
+      marks.list = res.marks ?? [];
+      tellMarks({ kind: 'marks', marks: marks.list });
+    } catch (e) {
+      marks.error = e.message;
+    }
+    drawMarks();
+  }
+
+  function marksPanel() {
+    if (marks.panel) return marks.panel;
+    marks.panel = globalThis.riftatlasMarksPanel.create({
+      onClose: () => tellMarks({ kind: 'closed' }),
+      onJump: (sequence) => tellMarks({ kind: 'jump', sequence }),
+      onAdd: () => changeMarks({ type: 'saveMark', sequence: marks.current, source: 'replay' }),
+      onSave: (sequence, text) => changeMarks({ type: 'saveMark', sequence, text, source: 'replay' }),
+      onDelete: (sequence) => changeMarks({ type: 'deleteMark', sequence }),
+      // Said on the host, which is what the page's own key handlers see of
+      // anything inside a closed shadow root.
+      onTyping: (on) => {
+        if (on) marks.host?.setAttribute(TYPING, '1'); else marks.host?.removeAttribute(TYPING);
+      },
+    });
+    marks.host = document.createElement('div');
+    marks.host.id = 'riftatlas-replay-marks';
+    marks.host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647;';
+    marks.host.append(marks.panel.element);
+    return marks.panel;
+  }
+
+  function drawMarks() {
+    if (!marks.open) {
+      if (marks.host?.isConnected) { marks.panel.reset(); marks.host.remove(); }
+      return;
+    }
+    if (!document.body) return;
+    const panel = marksPanel();
+    panel.update({
+      marks: marks.list, current: marks.current, last: marks.last,
+      labels: marks.labels, error: marks.error,
+    });
+    if (!marks.host.isConnected) document.body.append(marks.host);
+
+    // Placed as the reveals are: above the bar when it sits low, below it when
+    // it sits high, lined up with its right-hand end.
+    const a = marks.anchor ?? {};
+    const s = marks.host.style;
+    s.top = s.bottom = '';
+    if ((a.top ?? 0) > window.innerHeight / 2) s.bottom = `${Math.max(8, window.innerHeight - a.top + 8)}px`;
+    else s.top = `${Math.max(8, (a.bottom ?? 0) + 8)}px`;
+    s.right = `${Math.max(8, window.innerWidth - (a.right ?? window.innerWidth))}px`;
+  }
+
+  async function loadMarks(recordingId) {
+    marks.recordingId = recordingId;
+    marks.list = [];
+    try {
+      const res = await marksCall({ type: 'marks' });
+      marks.list = res.marks ?? [];
+      marks.error = null;
+    } catch (e) {
+      marks.error = e.message;
+    }
+    tellMarks({ kind: 'marks', marks: marks.list });
+    drawMarks();
+  }
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || event.data?.source !== TO_MARKS) return;
+    const msg = event.data;
+    if (typeof msg.recordingId !== 'string' || !msg.recordingId) return;
+    if (msg.recordingId !== marks.recordingId) loadMarks(msg.recordingId);
+
+    if (msg.op === 'state') {
+      marks.open = msg.open === true;
+      marks.current = Number.isInteger(msg.sequence) ? msg.sequence : marks.current;
+      marks.last = Number.isInteger(msg.last) ? msg.last : marks.last;
+      marks.labels = msg.labels && typeof msg.labels === 'object' ? msg.labels : {};
+      marks.anchor = msg.anchor ?? marks.anchor;
+      drawMarks();
+    } else if (msg.op === 'add' && Number.isInteger(msg.sequence)) {
+      changeMarks({ type: 'saveMark', sequence: msg.sequence, source: 'replay' });
+    } else if (msg.op === 'remove' && Number.isInteger(msg.sequence)) {
+      changeMarks({ type: 'deleteMark', sequence: msg.sequence });
+    } else if (msg.op === 'edit' && Number.isInteger(msg.sequence)) {
+      // Write a note on this step: mark it first if it is not marked yet.
+      const sequence = msg.sequence;
+      marks.open = true;
+      const open = () => { drawMarks(); marks.panel?.edit(sequence); };
+      if (marks.list.some((m) => m.sequence === sequence)) open();
+      else changeMarks({ type: 'saveMark', sequence, source: 'replay' }).then(open);
+    }
+  });
+
+  // While a note is being written, its keys are the note's. RiftAtlas' client
+  // and replay mode both listen for keys on the window, and from outside a
+  // closed shadow root a keystroke in the note looks like one on the page - so
+  // Space would play the replay and the arrows would step it. Content scripts
+  // run before the page's own, so this sees every key first. Escape and
+  // Ctrl+Enter are let through: the note itself answers those.
+  for (const type of ['keydown', 'keyup', 'keypress']) {
+    window.addEventListener(type, (e) => {
+      if (!marks.panel?.isTyping()) return;
+      if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) return;
+      e.stopImmediatePropagation();
+    }, true);
+  }
 
   const CSS = `
     :host { all: initial; }

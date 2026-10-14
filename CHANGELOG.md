@@ -6,6 +6,18 @@ for the "What's new" block in the listing description.
 
 ## Unreleased
 
+- **Mark steps and write notes in a replay.** Press M (or ☆ on the replay bar)
+  to mark the step you're on, and N to write a note there — something to rethink,
+  or to ask a coach about. The list button beside it shows every mark with its
+  note; click one to jump there, or use `,` and `.` to go between them. Marks
+  show as gold ticks above the slider, survive Rebuild, and are included in
+  Export, so whoever you send the file to sees them in the standalone player's
+  new Marks tab. The popup shows how many marks a recording has, and search
+  finds words in your notes.
+- **Import a replay file.** Press Import in the popup and pick a `.ratlas.json`
+  — your own export, or one someone sent you. It joins your recordings, ready
+  for Watch replay and for marking up, with any marks it came with. The player
+  also has an *Add to my recordings* button for any replay you open in it.
 - **Replays of games that started recording in the lobby now play.** If the
   extension began recording while you were waiting for your opponent, Watch
   replay showed an empty lobby instead of the board. That is fixed for new

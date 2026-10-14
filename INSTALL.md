@@ -120,6 +120,41 @@ them is where they will be next time.
 Playback runs about a second a move, but skips quickly through repeated actions
 — four rune exhausts in a row don't cost four seconds. Drag the slider to scrub.
 
+### Adding a replay file to your list
+
+Press **Import** in the popup, then pick a `.ratlas.json` — one you exported, or
+one someone sent you. It opens in the player and is added to your recordings
+straight away, ready for **Watch replay**, with any marks it came with. Any
+replay you open in the player can be added the same way with **Add to my
+recordings**.
+
+An imported replay is marked *imported* in the list. It has no recording behind
+it, so it has no Rebuild button; Export, Delete and marking work as usual.
+Importing the same file again replaces it. A match you recorded yourself is
+never replaced by a file of it.
+
+### Marking steps and writing notes
+
+To come back to a moment — a decision you're unsure of, something to ask a
+coach about — mark it.
+
+| Key | Does |
+|---|---|
+| M | mark the step you're on (again to unmark it) |
+| N | write a note on the step you're on |
+| `,` `.` | jump to the previous / next mark |
+
+The ☆ button on the bar does the same as M. The list button beside it opens
+every mark in the match with its note: click one to go there, the pencil to
+edit, the bin to delete (a mark with a note asks first). Ctrl+Enter saves a
+note, Esc cancels. Marks show as gold ticks above the slider.
+
+Marks are saved with the recording and survive Rebuild. **Export** includes
+them, so someone you send the file to sees your marks and notes in the
+standalone player under its **Marks** tab — they can't change them. The popup
+shows ★ and a count on any recording with marks, and searching finds words in
+your notes.
+
 ## What it does with your data
 
 - Recordings stay in the browser. Nothing is uploaded anywhere, by anyone.

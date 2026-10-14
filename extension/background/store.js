@@ -23,7 +23,7 @@ const VERSION = 1;
 
 export const SESSIONS = 'sessions';   // id -> session metadata + origin snapshot
 export const COMMITS = 'commits';     // [id, sequence] -> commit
-export const EXTRAS = 'extras';       // [id, kind, key] -> chat / gap snapshot / error
+export const EXTRAS = 'extras';       // [id, kind, key] -> chat / gap snapshot / error / mark
 export const REPLAYS = 'replays';     // id -> finished .ratlas.json
 
 /** A recording's identity: the room, plus when this recording began. */
@@ -111,6 +111,7 @@ export function stillAccepting(session, now) {
 export async function activeRecordingFor(roomCode, now = Date.now()) {
   const sessions = await all(SESSIONS);
   const candidates = sessions
+    .filter((s) => !s.imported)   // a file someone added is never live
     .filter((s) => roomOf(s.roomCode) === roomCode)
     .filter((s) => stillAccepting(s, now))
     .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));

@@ -38,7 +38,7 @@
       if (event.source !== window) return;
       if (event.data?.source !== 'riftatlas-replay-arm' || !event.data.replay) return;
       window.removeEventListener('message', onArm);
-      begin(event.data.replay, { reveals: event.data.reveals });
+      begin(event.data.replay, { reveals: event.data.reveals, recordingId: event.data.recordingId });
     };
     window.addEventListener('message', onArm);
     // Tell arm.js we are listening, in case it ran first.
@@ -415,6 +415,16 @@ function begin(replay, ARM) {
       padding:0 4px;border-radius:8px;background:#74efff;color:#0b1017;font-size:10px;font-weight:700;
       line-height:16px;text-align:center;box-sizing:border-box}
     #riftatlas-replay-bar .eye .badge[hidden]{display:none}
+    #riftatlas-replay-bar button.star{font-size:16px;color:#8698ab}
+    #riftatlas-replay-bar button.star.on{border-color:#d8b76e;color:#d8b76e}
+    #riftatlas-replay-bar .scrub{position:relative;display:flex;align-items:center}
+    #riftatlas-replay-bar .scrub input[type=range]{width:100%}
+    /* One tick per mark, above the track. Inset by half the thumb so a tick
+       lines up with where the thumb sits on that step. */
+    #riftatlas-replay-bar .ticks{position:absolute;left:8px;right:8px;top:-6px;height:5px;
+      pointer-events:none}
+    #riftatlas-replay-bar .ticks i{position:absolute;top:0;width:3px;height:5px;margin-left:-1px;
+      border-radius:1px;background:#d8b76e}
     #riftatlas-replay-bar.box .row.head{justify-content:space-between}
     #riftatlas-replay-bar button:hover{border-color:#74efff}
     #riftatlas-replay-bar input[type=range]{accent-color:#d8b76e;cursor:pointer;margin:0}
@@ -422,14 +432,19 @@ function begin(replay, ARM) {
       flex:0 0 auto;text-align:right;min-width:${DIGITS * 2 + 3}ch}
 
     /* Bar: one row under the board. */
-    #riftatlas-replay-bar.bar{width:min(560px,calc(100vw - 32px));height:46px;flex-wrap:nowrap}
-    #riftatlas-replay-bar.bar input[type=range]{flex:1 1 auto;min-width:60px}
+    /* 640, not 560: the two mark buttons came out of the scrubber's share. */
+    #riftatlas-replay-bar.bar{width:min(640px,calc(100vw - 32px));height:46px;flex-wrap:nowrap}
+    #riftatlas-replay-bar.bar .scrub{flex:1 1 auto;min-width:60px}
 
     /* Box: a narrow stack for the edges, where a bar cannot go. */
     #riftatlas-replay-bar.box{width:172px;flex-direction:column;align-items:stretch;
       gap:7px;padding:9px 10px}
     #riftatlas-replay-bar.box .row{display:flex;align-items:center;gap:5px}
-    #riftatlas-replay-bar.box input[type=range]{width:100%}
+    #riftatlas-replay-bar.box .scrub{width:100%}
+    /* Three buttons beside the label: a little narrower, so they fit. */
+    #riftatlas-replay-bar.box .row.head{gap:4px}
+    #riftatlas-replay-bar.box .row.head button{width:28px}
+    #riftatlas-replay-bar.box .row.head .grip{margin-right:auto}
     #riftatlas-replay-bar.box button{height:26px}
     /* The five transport buttons share the row instead of keeping a fixed
        width: at 28px each they needed 160px in a 150px row, so the last one
@@ -483,6 +498,11 @@ function begin(replay, ARM) {
   slider.value = '0';
   slider.title = 'Scrub';
   slider.oninput = () => seek(Number(slider.value));   // manual: stops playback
+  const ticks = document.createElement('div');
+  ticks.className = 'ticks';
+  const scrub = document.createElement('div');
+  scrub.className = 'scrub';
+  scrub.append(slider, ticks);
 
   const counter = document.createElement('span');
   counter.className = 'count';
@@ -514,7 +534,8 @@ function begin(replay, ARM) {
 
   const closeReveals = () => { revealsOpen = false; pinned = null; paintReveals(); };
   const eye = mk('', 'Cards the opponent revealed, then hid again', () => {
-    if (revealsOpen) closeReveals(); else { revealsOpen = true; paintReveals(); }
+    if (revealsOpen) closeReveals();
+    else { closeMarks(); revealsOpen = true; paintReveals(); }
   });
   eye.classList.add('eye');
   eye.innerHTML = EYE;   // static, ours
@@ -564,6 +585,154 @@ function begin(replay, ARM) {
     if (e.key === 'Escape' && revealsOpen) closeReveals();
   });
   addEventListener('resize', () => paintReveals());
+
+  // ---------------------------------------------------------------- marks
+  //
+  // Steps someone wants to come back to, each with an optional note. They are
+  // kept by the extension, which this world cannot reach, so the list is held
+  // and saved by content/overlay.js, which draws it beside the bar. This side
+  // has the buttons, the keys and the ticks on the scrubber, and says which
+  // step is showing. Marks are by sequence - the number in the counter - so a
+  // rebuild that recovers more of the match cannot move them.
+  const RECORDING = typeof ARM.recordingId === 'string' && ARM.recordingId
+    ? ARM.recordingId : (replay.recordingId ?? null);
+  const TO_MARKS = 'riftatlas-replay-marks';
+  const FROM_MARKS = 'riftatlas-replay-marks-panel';
+  const LIST = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/><path d="M9 8h6M9 11.5h4"/></svg>';
+  let marks = [];   // as last reported by the overlay, in match order
+  let marksOpen = false;
+
+  const tellMarks = (m) => window.postMessage(
+    { source: TO_MARKS, recordingId: RECORDING, ...m }, window.location.origin);
+  const markAt = (seq) => marks.find((m) => m.sequence === seq);
+
+  /** The first state at or after a sequence: where a mark on it lands. */
+  const seekSequence = (seq) => {
+    const at = order.findIndex((q) => q >= seq);
+    if (at >= 0) seek(at);
+  };
+
+  /** What the panel shows beside a mark: the turn, and what had just happened. */
+  function labelFor(seq) {
+    const at = order.findIndex((q) => q >= seq);
+    const [state, log] = states.get(order[at >= 0 ? at : order.length - 1]);
+    return {
+      turn: log.find((e) => e.turnNumber != null)?.turnNumber ?? null,
+      phase: state?.phase ?? null,
+      text: log[0]?.text ?? null,
+    };
+  }
+
+  /**
+   * M on a bare mark takes it away again. A mark with a note is never removed
+   * by one keypress - that opens the note instead, and deleting is done in the
+   * list, where a mark with words in it asks first.
+   */
+  function toggleMark() {
+    if (!RECORDING) return;
+    const seq = order[cursor];
+    const here = markAt(seq);
+    if (!here) tellMarks({ op: 'add', sequence: seq });
+    else if (here.text) noteHere();
+    else tellMarks({ op: 'remove', sequence: seq });
+  }
+
+  /** Open the note on the step showing, marking it first if need be. */
+  function noteHere() {
+    if (!RECORDING) return;
+    stop();
+    if (revealsOpen) closeReveals();
+    marksOpen = true;
+    paintMarks();
+    tellMarks({ op: 'edit', sequence: order[cursor] });
+  }
+
+  function stepMark(direction) {
+    const seq = order[cursor];
+    const target = direction > 0
+      ? marks.find((m) => m.sequence > seq)
+      : marks.findLast((m) => m.sequence < seq);
+    if (target) seekSequence(target.sequence);
+  }
+
+  const closeMarks = () => { if (!marksOpen) return; marksOpen = false; paintMarks(); };
+  const star = mk('☆', 'Mark this step (M)', () => toggleMark());
+  star.classList.add('star');
+  const marksButton = mk('', 'Marks and notes (N writes a note on this step)', () => {
+    if (marksOpen) closeMarks();
+    else { if (revealsOpen) closeReveals(); marksOpen = true; paintMarks(); }
+  });
+  // Shaped like the eye button: an icon with a count on its corner.
+  marksButton.classList.add('eye', 'marks');
+  marksButton.innerHTML = LIST;   // static, ours
+  const marksBadge = document.createElement('span');
+  marksBadge.className = 'badge';
+  marksButton.append(marksBadge);
+
+  let marksPosted = null;
+  let ticksDrawn = null;
+  function paintMarks() {
+    const seq = order[cursor];
+    const here = markAt(seq);
+    star.textContent = here ? '★' : '☆';
+    star.classList.toggle('on', !!here);
+    star.title = !here ? 'Mark this step (M)'
+      : here.text ? 'Marked, with a note (M opens it)' : 'Marked (M to unmark)';
+    star.setAttribute('aria-label', star.title);
+    star.setAttribute('aria-pressed', String(!!here));
+    marksBadge.textContent = String(marks.length);
+    marksBadge.hidden = marks.length === 0;
+    marksButton.classList.toggle('on', marksOpen);
+    marksButton.setAttribute('aria-pressed', String(marksOpen));
+
+    const tickKey = marks.map((m) => m.sequence).join(',');
+    if (tickKey !== ticksDrawn) {
+      ticksDrawn = tickKey;
+      ticks.replaceChildren();
+      const span = Math.max(1, order.length - 1);
+      for (const m of marks) {
+        const at = order.findIndex((q) => q >= m.sequence);
+        if (at < 0) continue;
+        const tick = document.createElement('i');
+        tick.style.left = `${at / span * 100}%`;
+        ticks.append(tick);
+      }
+    }
+
+    if (!RECORDING) return;
+    const box = bar.getBoundingClientRect();
+    const labels = {};
+    if (marksOpen) for (const m of marks) labels[m.sequence] = labelFor(m.sequence);
+    const message = {
+      op: 'state', open: marksOpen, sequence: seq, last: LAST, labels,
+      anchor: { top: box.top, bottom: box.bottom, left: box.left, right: box.right },
+    };
+    // Every step repaints; only tell the overlay when something it shows moved.
+    const key = JSON.stringify(marksOpen ? [true, seq, labels, message.anchor] : [false]);
+    if (key === marksPosted) return;
+    marksPosted = key;
+    tellMarks(message);
+  }
+
+  addEventListener('message', (e) => {
+    if (e.source !== window || e.data?.source !== FROM_MARKS) return;
+    if (e.data.kind === 'marks' && Array.isArray(e.data.marks)) {
+      marks = e.data.marks
+        .filter((m) => Number.isInteger(m?.sequence))
+        .sort((a, b) => a.sequence - b.sequence);
+      marksPosted = null;   // the labels to send have changed
+      paintMarks();
+    } else if (e.data.kind === 'jump' && Number.isInteger(e.data.sequence)) {
+      seekSequence(e.data.sequence);
+    } else if (e.data.kind === 'closed') {
+      closeMarks();
+    }
+  });
+
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && marksOpen) closeMarks();
+  });
+  addEventListener('resize', () => paintMarks());
   const move = mk('✥', 'Move between bottom centre and bottom right', () => cyclePreset());
 
   /** Rebuild the controls for whichever shape is in use. */
@@ -575,17 +744,18 @@ function begin(replay, ARM) {
     bar.replaceChildren();
 
     if (layout === 'bar') {
-      bar.append(grip, first, prev, transport, next, last, slider, counter, eye, move, close);
+      bar.append(grip, first, prev, transport, next, last, scrub, counter,
+        ...(RECORDING ? [star, marksButton] : []), eye, move, close);
     } else {
       const head = document.createElement('div');
       head.className = 'row head';
-      head.append(grip, eye);
+      head.append(grip, ...(RECORDING ? [star, marksButton] : []), eye);
       const controls = document.createElement('div');
       controls.className = 'row controls';
       controls.append(first, prev, transport, next, last);
       const track = document.createElement('div');
       track.className = 'row';
-      track.append(slider);
+      track.append(scrub);
       const footer = document.createElement('div');
       footer.className = 'row footer';
       footer.append(move, counter, close);
@@ -593,6 +763,7 @@ function begin(replay, ARM) {
     }
     applyPosition();
     paintReveals();
+    paintMarks();
   }
 
   /** Put it where the placement says. */
@@ -644,6 +815,7 @@ function begin(replay, ARM) {
     };
     applyPosition();
     paintReveals();
+    paintMarks();
   });
   const endDrag = (e) => {
     if (!dragging) return;
@@ -689,6 +861,7 @@ function begin(replay, ARM) {
     // lives in a tooltip rather than in the layout.
     bar.title = log[0]?.text ?? `Sequence ${seq}`;
     paintReveals();
+    paintMarks();
   }
 
   addEventListener('keydown', (e) => {
@@ -698,15 +871,27 @@ function begin(replay, ARM) {
     const el = e.target;
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
         || el instanceof HTMLSelectElement || el?.isContentEditable) return;
+    // A note being written in the marks panel. It sits in a closed shadow
+    // root, so from here it looks like a plain element; the overlay flags it.
+    if (el instanceof Element && el.closest('[data-riftatlas-typing]')) return;
 
     if (e.key === 'ArrowRight') { e.preventDefault(); seek(cursor + 1); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); seek(cursor - 1); }
     else if (e.key === 'Home') { e.preventDefault(); seek(0); }
     else if (e.key === 'End') { e.preventDefault(); seek(order.length - 1); }
     else if (e.key === ' ') { e.preventDefault(); toggle(); }
+    else if (RECORDING && (e.key === 'm' || e.key === 'M')) { e.preventDefault(); toggleMark(); }
+    else if (RECORDING && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); noteHere(); }
+    else if (e.key === ',') { e.preventDefault(); stepMark(-1); }
+    else if (e.key === '.') { e.preventDefault(); stepMark(1); }
   }, true);
 
-  const mount = () => { document.body.append(bar); applyLayout(); paint(); };
+  const mount = () => {
+    document.body.append(bar);
+    applyLayout();
+    paint();
+    if (RECORDING) tellMarks({ op: 'load' });
+  };
   if (document.body) mount(); else addEventListener('DOMContentLoaded', mount);
 
   /**

@@ -19,6 +19,7 @@ overlayToggle.onchange = () => {
 };
 
 document.getElementById('open-player').onclick = () => send({ type: 'openPlayer' });
+document.getElementById('import').onclick = () => send({ type: 'openPlayer', import: true });
 
 document.getElementById('unstick').onclick = async (e) => {
   const button = e.currentTarget;
@@ -127,6 +128,7 @@ function haystack(row) {
     started && when(row.startedAt),
     started && started.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
     started && started.toISOString().slice(0, 10),
+    row.markText,   // notes written on its marks
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -188,6 +190,17 @@ function render() {
       setTimeout(() => { b.textContent = 'Copy'; }, 1200);
     }));
     if (!row.finished) head.append(tag('recording', 'live'));
+    if (row.imported) {
+      const t = tag('imported', 'imported');
+      t.title = 'Added from a .ratlas.json file rather than recorded here, so it cannot be rebuilt.';
+      head.append(t);
+    }
+    if (row.markCount) {
+      const t = tag(`★ ${row.markCount}`, 'marks');
+      t.title = `${row.markCount} marked step${row.markCount === 1 ? '' : 's'}. `
+        + 'Open them from the replay bar; Export includes them.';
+      head.append(t);
+    }
     if (row.partial) head.append(tag('partial', 'partial'));
     if (row.stale) {
       const t = tag(`rebuild — ${row.builtCommits}/${row.recordedCommits}`, 'partial');
@@ -241,6 +254,12 @@ function render() {
     // Row 3: the rest.
     const actions = document.createElement('div');
     actions.className = 'actions';
+    const rebuild = small('Rebuild', 'Re-assemble the replay from what was recorded. Not normally '
+      + 'needed — recording is continuous, and Export rebuilds anyway.', async (e) => {
+      e.currentTarget.textContent = 'Rebuilding…';
+      await send({ type: 'finalise', roomCode: id });
+      refresh();
+    });
     actions.append(
       small('Export', 'Save this match as a .ratlas.json file. Rebuilds first, '
         + 'so an export is always up to date.', async (e) => {
@@ -251,12 +270,8 @@ function render() {
         if (!res?.ok) meta.textContent = res?.error ?? 'export failed';
         setTimeout(() => { b.textContent = 'Export'; }, 1800);
       }),
-      small('Rebuild', 'Re-assemble the replay from what was recorded. Not normally '
-        + 'needed — recording is continuous, and Export rebuilds anyway.', async (e) => {
-        e.currentTarget.textContent = 'Rebuilding…';
-        await send({ type: 'finalise', roomCode: id });
-        refresh();
-      }),
+      // An imported replay has no recording behind it to rebuild from.
+      ...(row.imported ? [] : [rebuild]),
       small('Delete', 'Delete this recording', () => askDelete(li, code, id), 'danger'),
     );
 

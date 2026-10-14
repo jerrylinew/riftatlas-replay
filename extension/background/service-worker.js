@@ -7,8 +7,10 @@
  */
 import { onFrame, looksFinished, everyoneLeft, endsWithSocket } from './recorder.js';
 import { buildReplay } from './finalise.js';
-import { SESSIONS, COMMITS, EXTRAS, REPLAYS, all, get, put, dropRecording, commitsFor, extrasFor, roomOf, isEmptyRecording, activeRecordingFor } from './store.js';
+import { SESSIONS, COMMITS, EXTRAS, REPLAYS, all, get, put, del, dropRecording, commitsFor, extrasFor, roomOf, isEmptyRecording, activeRecordingFor } from './store.js';
 import { extractReveals, revealsFromReplay } from '../shared/reveals.js';
+import { normaliseMark, cleanMarks, withMarks } from '../shared/marks.js';
+import { prepareImport } from '../shared/replay-import.js';
 
 /**
  * Build a data: URL for a download. Chunked, because spreading a large array
@@ -22,6 +24,12 @@ function jsonDataUrl(value) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   }
   return 'data:application/json;base64,' + btoa(binary);
+}
+
+/** One recording's marks, in match order, as exported. */
+async function marksFor(recordingId) {
+  if (!recordingId) return [];
+  return cleanMarks(await extrasFor(recordingId, 'mark'));
 }
 
 /** Rooms whose socket closed or whose log announced a result, awaiting finalise. */
@@ -124,6 +132,11 @@ chrome.runtime.onStartup.addListener(() => { rebuildFailed('browser start').catc
  * ended is ended whether or not a replay came out of it.
  */
 async function finalise(recordingId, { close = true } = {}) {
+  // An imported replay has no frames behind it: the file is the replay, and
+  // building from nothing would replace it with an error.
+  try {
+    if ((await get(SESSIONS, recordingId))?.imported) return;
+  } catch { /* carry on; the build reports its own trouble */ }
   if (close) {
     try {
       const session = await get(SESSIONS, recordingId);
@@ -277,7 +290,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const now = Date.now();
       const live = [];
       for (const s of sessions) {
-        if (!isEmptyRecording(s, counts.get(s.roomCode))) { live.push(s); continue; }
+        // An imported replay has no commits of its own and is never residue.
+        if (s.imported || !isEmptyRecording(s, counts.get(s.roomCode))) { live.push(s); continue; }
         if (now - (s.lastAt ?? 0) > SETTLE_MS) dropRecording(s.roomCode).catch(() => {});
       }
 
@@ -286,6 +300,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .map(async (s) => {
           const replay = built.get(s.roomCode)?.replay ?? null;
           const recorded = counts.get(s.roomCode) ?? 0;
+          const marks = await marksFor(s.roomCode);
           return {
             roomCode: s.roomCode,               // the recording id, used by actions
             room: s.room ?? roomOf(s.roomCode),  // the code a person recognises
@@ -293,6 +308,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             lastAt: s.lastAt,
             finished: s.finished === true,
             partial: s.partial === true,
+            imported: s.imported === true,
             hasReplay: !!replay,
             builtAt: built.get(s.roomCode)?.builtAt ?? null,
             recordedCommits: recorded,
@@ -300,7 +316,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             // A built replay can fall behind its recording - an early finalise
             // once froze one at the dice roll while recording carried on. Say
             // so rather than letting a short replay look like a short match.
-            stale: !!replay && replay.commits.length < recorded
+            stale: !s.imported && !!replay && replay.commits.length < recorded
               && !replay.coverage?.unanchored,
             unanchored: replay?.coverage?.unanchored ?? null,
             match: replay?.match ?? null,
@@ -309,6 +325,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             buildError: s.buildError ?? null,
             stoppedEarly: replay?.coverage?.stoppedAt ?? null,
             needsNewVersion: needsNewVersion(s.buildError || s.coverageStoppedEarly || ''),
+            // Counted for the row, and their words kept so search finds them.
+            markCount: marks.length,
+            markText: marks.map((m) => m.text).filter(Boolean).join(' '),
           };
         }));
       sendResponse(rows);
@@ -336,6 +355,43 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (msg?.type === 'marks') {
+    marksFor(msg.recordingId)
+      .then((marks) => sendResponse({ ok: true, marks }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+
+  if (msg?.type === 'saveMark') {
+    (async () => {
+      const id = msg.recordingId;
+      if (!id || !(await get(SESSIONS, id))) {
+        return sendResponse({ ok: false, error: 'that recording is no longer here' });
+      }
+      const key = String(msg.sequence);
+      const before = await get(EXTRAS, [id, 'mark', key]);
+      const mark = normaliseMark({
+        sequence: msg.sequence,
+        text: msg.text ?? before?.text ?? '',
+        source: before?.source ?? msg.source,
+        createdAt: before?.createdAt,
+        updatedAt: Date.now(),
+      });
+      if (!mark) return sendResponse({ ok: false, error: 'not a step of this match' });
+      await put(EXTRAS, { roomCode: id, kind: 'mark', id: key, ...mark });
+      sendResponse({ ok: true, marks: await marksFor(id) });
+    })().catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+
+  if (msg?.type === 'deleteMark') {
+    (async () => {
+      await del(EXTRAS, [msg.recordingId, 'mark', String(msg.sequence)]);
+      sendResponse({ ok: true, marks: await marksFor(msg.recordingId) });
+    })().catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+
   if (msg?.type === 'export') {
     (async () => {
       // Rebuild first, always. A replay built earlier in the match can be
@@ -344,8 +400,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       await finalise(msg.roomCode, { close: false });
       const row = await get(REPLAYS, msg.roomCode);
       if (!row) return sendResponse({ ok: false, error: 'nothing recorded for this room' });
+      // Marks live beside the recording, not in the built replay, so a rebuild
+      // cannot lose them; this is where they join it.
+      const replay = withMarks(row.replay, await marksFor(msg.roomCode));
       // A data: URL keeps the download entirely local; no blob URL, no fetch.
-      const url = jsonDataUrl(row.replay);
+      const url = jsonDataUrl(replay);
       chrome.downloads.download({ url, filename: `${msg.roomCode}.ratlas.json`, saveAs: true },
         () => sendResponse({ ok: !chrome.runtime.lastError, error: chrome.runtime.lastError?.message }));
       return;
@@ -383,7 +442,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // the reducer's module cannot be loaded, so they are worked out here.
       let reveals = [];
       try { reveals = revealsFromReplay(row.replay); } catch { /* the replay still plays */ }
-      await chrome.storage.session.set({ pendingReplay: row.replay, pendingReveals: reveals });
+      // The recording id too, which is what its marks are kept under.
+      await chrome.storage.session.set({
+        pendingReplay: row.replay, pendingReveals: reveals, pendingRecordingId: msg.roomCode,
+      });
       await registerArmingScripts();
       await chrome.tabs.update(tab.id, { active: true, url: 'https://play.riftatlas.com/game' });
       sendResponse({ ok: true, roomCode: msg.roomCode });
@@ -443,8 +505,31 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg?.type === 'openPlayer') {
-    chrome.tabs.create({ url: chrome.runtime.getURL('player/player.html') });
+    // `import` opens it ready to add a file to the recordings. The popup cannot
+    // do that itself: a file picker takes focus, and losing focus closes it.
+    const url = chrome.runtime.getURL('player/player.html') + (msg.import ? '#import' : '');
+    chrome.tabs.create({ url });
     return false;
+  }
+
+  if (msg?.type === 'importReplay') {
+    (async () => {
+      const { id, session, replay, marks } = prepareImport(msg.replay);
+      const existing = await get(SESSIONS, id);
+      // A match recorded here is the original; a file of it adds nothing and
+      // must not replace what the recorder can still rebuild from.
+      if (existing && !existing.imported) {
+        return sendResponse({ ok: false, error: 'That match is already in your recordings.' });
+      }
+      if (existing) await dropRecording(id);   // importing the same file again replaces it
+      await put(SESSIONS, session);
+      await put(REPLAYS, { roomCode: id, builtAt: Date.now(), replay });
+      for (const mark of marks) {
+        await put(EXTRAS, { roomCode: id, kind: 'mark', id: String(mark.sequence), ...mark });
+      }
+      sendResponse({ ok: true, id, room: session.room, marks: marks.length, replaced: !!existing });
+    })().catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
   }
 
   return false;

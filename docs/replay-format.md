@@ -103,6 +103,12 @@ match lands at roughly 550 KiB uncompressed, well under 150 KiB gzipped.
 
   "chat": [
     { "at": 1789532387166, "authorPlayerId": "plr_135347f2", "text": "ggg" }
+  ],
+
+  // Optional. Present only when someone marked steps of the match.
+  "marks": [
+    { "sequence": 85, "text": "Should have held the rune here",
+      "createdAt": 1789532390000, "updatedAt": 1789532412000, "source": "replay" }
   ]
 }
 ```
@@ -164,6 +170,17 @@ broken: a match abandoned mid-play has no winner to name.
 **`gaps[]`** must be non-lossy: if the chain broke and no snapshot was captured
 at the far side, emit the gap with `"recovery": "none"` and accept that the
 replay ends there. Do not interpolate.
+
+**`marks[]`** are steps someone marked while reviewing the match, each with an
+optional note (`text`, empty for a bare bookmark). A mark is on a `sequence`,
+not a position in `commits[]`, so it means the same step however much of the
+match a rebuild recovers; a reader lands it on the first state at or after that
+sequence. At most one mark per sequence, in sequence order. `source` is
+`"replay"` for a mark made in replay mode and `"live"` for one made during the
+match. The field is additive and optional: it is absent rather than empty when
+there are no marks, so `version` is unchanged, and a reader that does not know
+it loses nothing but the notes. Marks are the reviewer's words, not the
+server's, and a reader treats them as untrusted text.
 
 **Credentials** — `authToken`, `_pk`, and the handshake frames that carry them
 are never written. The writer redacts at extraction time

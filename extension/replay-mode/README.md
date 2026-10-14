@@ -104,7 +104,7 @@ strand the controls off-screen.
 
 ## The control bar's geometry
 
-Fixed: 560x46 for the bar, 172px wide for the box, and neither moves as the
+Fixed: 640x46 for the bar, 172px wide for the box, and neither moves as the
 cursor does. Nothing in it resizes as
 the cursor moves, because the board is what you are reading and a bar that
 reflows under the pointer makes stepping feel unreliable.
@@ -168,9 +168,38 @@ deliberately to look at it.
 | space | play / pause / replay |
 | left, right | step |
 | Home, End | first, last |
+| M | mark this step, or unmark it if it has no note |
+| N | write a note on this step |
+| `,` `.` | previous / next mark |
 
 Keys are ignored while a text field has focus, so the client's chat and its own
 shortcuts keep working.
+
+## Marks
+
+Marks and their notes are kept by the extension, in the `extras` store beside
+the recording's chat - not on the built replay, which every rebuild replaces.
+This world cannot reach the extension's storage, so the work is split the way
+the reveals panel is:
+
+- **Here** (inject.js): the ☆ and list buttons, the keys, the gold ticks above
+  the slider, and where the replay is. It posts `riftatlas-replay-marks`
+  messages: `load`, `add`, `remove`, `edit` (open a step's note, marking it
+  first if need be) and `state` (open or not, the sequence showing, a turn and
+  log line per mark, the bar's box).
+- **content/overlay.js**: keeps the list, saves through the worker
+  (`marks` / `saveMark` / `deleteMark`), and draws `shared/marks-panel.js`
+  beside the bar. It answers on `riftatlas-replay-marks-panel` with the list,
+  a jump, or a close.
+
+M never deletes a note: on a mark with words in it, it opens the note instead.
+
+A note is typed inside a closed shadow root, where a keystroke looks to the
+page like one on a plain element - so Space would play and the arrows would
+step. The overlay stops those keys at the window before anyone else sees them
+(content scripts register first), and also flags its host with
+`data-riftatlas-typing`, which this file's key handler checks, so the guard
+holds whichever listener runs first.
 
 ## Known limits
 

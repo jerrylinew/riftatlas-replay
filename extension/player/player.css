@@ -22,10 +22,17 @@ button:hover { border-color: var(--cyan); }
   border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
 #room { color: var(--gold); letter-spacing: .06em; }
 #meta, #pos, #now { color: var(--dim); font-size: 12px; }
-#fog { margin-left: auto; color: var(--warn); font-size: 12px;
+/* Everything after the title sits at the right, whichever of it is showing. */
+#title { margin-right: auto; }
+#fog { color: var(--warn); font-size: 12px;
   border: 1px solid rgba(255,157,107,.35); border-radius: 4px; padding: 3px 9px; }
 #open { border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px;
   cursor: pointer; background: var(--panel); }
+#save { border-color: var(--gold); color: var(--gold); }
+#save:disabled { opacity: .6; cursor: default; }
+#saved { color: var(--dim); font-size: 12px; }
+#saved.ok { color: var(--cyan); }
+#saved.bad { color: var(--warn); }
 
 #rail { display: flex; gap: 5px; overflow-x: auto; padding: 7px 14px;
   border-bottom: 1px solid var(--line); }
@@ -49,6 +56,22 @@ main { display: grid; grid-template-columns: minmax(0,1fr) 330px; min-height: 0;
 #events li:hover { background: var(--hidden); }
 #events li.on { background: var(--hidden); border-left-color: var(--gold); color: #fff; }
 #events li .turn { color: var(--dim); font-size: 11px; margin-right: 6px; }
+
+#marks { list-style: none; }
+#marks .empty { color: var(--dim); padding: 4px 7px; cursor: default; }
+#marks li.mark { padding: 6px 8px; border-left: 2px solid transparent; cursor: pointer;
+  border-radius: 0 3px 3px 0; display: grid; gap: 2px; }
+#marks li.mark:hover { background: var(--hidden); }
+#marks li.mark.on { background: var(--hidden); border-left-color: var(--gold); }
+#marks .top { display: flex; gap: 7px; align-items: baseline; }
+#marks .star { color: var(--gold); }
+#marks .seq { font-weight: 600; font-variant-numeric: tabular-nums; }
+#marks .when, #marks .ctx { color: var(--dim); font-size: 11.5px; }
+#marks .ctx { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#marks .note { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere;
+  border-left: 2px solid var(--line); padding-left: 8px; }
+#marks .live { font-size: 10px; font-weight: 700; color: var(--bg); background: var(--cyan);
+  border-radius: 3px; padding: 0 5px; }
 
 .seat { border: 1px solid var(--line); border-radius: 6px; padding: 9px;
   background: linear-gradient(180deg, rgba(255,255,255,.02), transparent); }
@@ -98,6 +121,9 @@ main { display: grid; grid-template-columns: minmax(0,1fr) 330px; min-height: 0;
 #ticks i { position: absolute; bottom: 0; width: 1px; height: 6px;
   background: rgba(219,231,243,.42); }
 #ticks i.gap { width: 3px; height: 34px; background: var(--warn); }
+#mark-ticks { position: absolute; inset: 0 0 auto 0; height: 9px; pointer-events: none; }
+#mark-ticks i { position: absolute; top: 0; width: 3px; margin-left: -1px; height: 8px;
+  border-radius: 0 0 2px 2px; background: var(--gold); }
 #head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--cyan);
   box-shadow: 0 0 7px var(--cyan); pointer-events: none; }
 #controls { display: flex; gap: 5px; align-items: center; margin-top: 7px; flex-wrap: wrap; }

@@ -11,6 +11,7 @@
  */
 import { timelineFromReplay, buildIndex, Cursor } from '../shared/timeline-index.js';
 import { harToReplay, looksLikeHar } from '../shared/har-import.js';
+import { cleanMarks } from '../shared/marks.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -28,6 +29,16 @@ const FIELD_ZONES = [
 
 let state = null;   // { replay, timeline, index, cursor }
 let playing = null;
+
+/**
+ * Opened from the popup's Import button: whatever file is picked next goes
+ * straight into the recordings list. Read before the first render, which
+ * rewrites the hash.
+ */
+const importing = location.hash === '#import';
+/** Only as the extension's own page is there a list to add a file to. */
+const canSave = !!globalThis.chrome?.runtime?.id;
+let opened = null;   // the file as read, for adding to the list
 
 // ---------------------------------------------------------------- rendering
 
@@ -226,6 +237,99 @@ function renderEvents() {
   });
 }
 
+/** The step a mark takes the player to: its own, or the first one after it. */
+function markTarget(mark) {
+  return state.index.sequences.find((q) => q >= mark.sequence) ?? state.index.last;
+}
+
+/**
+ * The marks someone made while reviewing this match in replay mode, with
+ * their notes. Read-only: this page opens a file it was given and keeps
+ * nothing, so there is nowhere for a change to go.
+ */
+function renderMarks() {
+  const list = $('#marks');
+  list.replaceChildren();
+  const { marks, index } = state;
+  $('#marks-tab').textContent = marks.length ? `Marks (${marks.length})` : 'Marks';
+  if (!marks.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'No marks in this replay. Marks made in replay mode come with it when it is exported.';
+    list.append(li);
+  }
+  for (const mark of marks) {
+    const target = markTarget(mark);
+    const li = document.createElement('li');
+    li.className = 'mark';
+    li.dataset.sequence = String(target);
+    li.title = 'Go to this step';
+
+    const top = document.createElement('span');
+    top.className = 'top';
+    const star = document.createElement('span');
+    star.className = 'star';
+    star.textContent = '★';
+    const seq = document.createElement('span');
+    seq.className = 'seq';
+    seq.textContent = `${mark.sequence}/${index.last}`;
+    top.append(star, seq);
+    const chapter = index.chapterBySequence.get(target);
+    if (chapter) {
+      const when = document.createElement('span');
+      when.className = 'when';
+      when.textContent = chapter.kind === 'phase' ? chapter.label.replace(/_/g, ' ') : chapter.label;
+      top.append(when);
+    }
+    if (mark.source === 'live') {
+      const live = document.createElement('span');
+      live.className = 'live';
+      live.textContent = 'live';
+      live.title = 'Marked during the match';
+      top.append(live);
+    }
+    li.append(top);
+
+    const event = index.events[currentEventIndex(target)];
+    if (event?.text) {
+      const ctx = document.createElement('span');
+      ctx.className = 'ctx';
+      ctx.textContent = event.text;
+      li.append(ctx);
+    }
+    if (mark.text) {
+      const note = document.createElement('p');
+      note.className = 'note';
+      note.textContent = mark.text;
+      li.append(note);
+    }
+    li.onclick = () => go(target);
+    list.append(li);
+  }
+
+  const span = index.last - index.first + 1;
+  const ticks = $('#mark-ticks');
+  ticks.replaceChildren();
+  for (const mark of marks) {
+    const i = document.createElement('i');
+    i.style.left = `${(markTarget(mark) - index.first) / span * 100}%`;
+    ticks.append(i);
+  }
+}
+
+/** The next or previous mark from where the player is. */
+function stepMark(direction) {
+  const seq = state.cursor.sequence;
+  const targets = state.marks.map(markTarget);
+  const to = direction > 0 ? targets.find((q) => q > seq) : targets.findLast((q) => q < seq);
+  if (to != null) go(to);
+}
+
+function selectTab(name) {
+  for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('on', b.dataset.tab === name);
+  for (const pane of document.querySelectorAll('.pane')) pane.classList.toggle('on', pane.id === name);
+}
+
 function renderTrack() {
   const { index } = state;
   const span = index.last - index.first + 1;
@@ -317,6 +421,10 @@ function render() {
     li.scrollIntoView({ block: 'nearest' });
   }
 
+  for (const li of $('#marks').children) {
+    li.classList.toggle('on', li.dataset.sequence === String(seq));
+  }
+
   $('#pos').textContent = `seq ${seq} / ${index.last} - ${chapter?.label ?? ''}`;
   $('#now').textContent = current?.text ?? '';
   location.hash = `seq=${seq}`;
@@ -375,7 +483,7 @@ function setPlaying(on) {
 function load(replay) {
   const timeline = timelineFromReplay(replay);
   const index = buildIndex(timeline);
-  state = { replay, timeline, index, cursor: new Cursor(index) };
+  state = { replay, timeline, index, cursor: new Cursor(index), marks: cleanMarks(replay.marks) };
 
   $('#room').textContent = replay.match.roomCode ?? 'Replay';
   const winner = replay.players.find((p) => p.id === replay.match.outcome?.winnerPlayerId);
@@ -406,6 +514,9 @@ function load(replay) {
   renderRail();
   renderEvents();
   renderTrack();
+  renderMarks();
+  // A replay sent with marks was sent to be looked at through them.
+  selectTab(state.marks.length ? 'marks' : 'events');
 
   const fromHash = Number(new URLSearchParams(location.hash.slice(1)).get('seq'));
   state.cursor.sequence = Number.isFinite(fromHash) && index.sequences.includes(fromHash)
@@ -428,11 +539,59 @@ async function openFile(file) {
   const text = await file.text();
   try {
     const parsed = JSON.parse(text);
-    load(looksLikeHar(text) ? harToReplay(parsed) : parsed);
+    const replay = looksLikeHar(text) ? harToReplay(parsed) : parsed;
+    // Kept as read: showing it builds a timeline, and the list gets the file.
+    opened = structuredClone(replay);
+    load(replay);
   } catch (err) {
     $('#room').textContent = 'Could not open';
     $('#meta').textContent = err.message;
+    opened = null;
   }
+  showSave();
+  if (opened && importing) saveToRecordings();
+}
+
+function showSave(status, kind) {
+  const save = $('#save');
+  save.hidden = !canSave || !opened;
+  save.disabled = false;
+  save.textContent = 'Add to my recordings';
+  const saved = $('#saved');
+  saved.hidden = !status;
+  saved.textContent = status ?? '';
+  saved.className = kind ?? '';
+}
+
+/**
+ * Put the open file in the extension's list, where it can be watched in
+ * RiftAtlas' board and marked up like a match recorded here.
+ */
+async function saveToRecordings() {
+  if (!opened || !canSave) return;
+  const save = $('#save');
+  save.disabled = true;
+  save.textContent = 'Adding…';
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'importReplay', replay: opened });
+    if (!res?.ok) { showSave(res?.error ?? 'Could not add it.', 'bad'); return; }
+    showSave(`${res.replaced ? 'Updated' : 'Added'} ${res.room}`
+      + (res.marks ? ` with ${res.marks} mark${res.marks === 1 ? '' : 's'}` : '')
+      + ' — find it in the extension popup.', 'ok');
+    $('#save').hidden = true;
+  } catch (err) {
+    showSave(`Could not add it: ${err.message}`, 'bad');
+  }
+}
+
+$('#save').onclick = () => saveToRecordings();
+if (importing && canSave) {
+  const hint = $('#hint');
+  if (hint) {
+    hint.textContent = 'Pick a .ratlas.json replay with “Open replay or HAR”, or drop one here. '
+      + 'It is added to your recordings as soon as it opens, ready to watch in RiftAtlas’ board.';
+  }
+  document.title = 'Import a replay — RiftAtlas Replay';
 }
 
 $('#file').addEventListener('change', (e) => {
@@ -471,10 +630,7 @@ for (const [id, fn] of [
 $('#b-play').onclick = () => setPlaying(!playing);
 
 for (const b of document.querySelectorAll('.tabs button')) {
-  b.onclick = () => {
-    for (const other of document.querySelectorAll('.tabs button')) other.classList.toggle('on', other === b);
-    for (const pane of document.querySelectorAll('.pane')) pane.classList.toggle('on', pane.id === b.dataset.tab);
-  };
+  b.onclick = () => selectTab(b.dataset.tab);
 }
 
 // Arrows are the primary control and must not be swallowed by a focused panel.
@@ -489,6 +645,7 @@ addEventListener('keydown', (e) => {
   };
   if (keys[e.key]) { e.preventDefault(); keys[e.key](); render(); return; }
   if (e.key === ' ') { e.preventDefault(); setPlaying(!playing); return; }
+  if (e.key === ',' || e.key === '.') { e.preventDefault(); stepMark(e.key === '.' ? 1 : -1); return; }
   if (/^[1-9]$/.test(e.key)) {
     const chapter = state.index.chapters.find((ch) => ch.turnNumber === Number(e.key));
     if (chapter) { e.preventDefault(); go(chapter.sequence); }

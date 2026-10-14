@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Library — RiftAtlas Replay</title>
+<!-- Nothing leaves the machine: everything shown here is already in the extension. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<link rel="stylesheet" href="library.css">
+
+<header id="top">
+  <strong>Library</strong>
+  <span id="totals"></span>
+  <input id="search" type="search" placeholder="Search opponent, legend, room, note…"
+         autocomplete="off" spellcheck="false">
+</header>
+
+<main>
+  <nav id="games" aria-label="Games"><p class="empty">Loading…</p></nav>
+  <section id="detail" aria-live="polite">
+    <p class="empty">Pick a game on the left.</p>
+  </section>
+</main>
+
+<script src="../shared/marks-panel.js"></script>
+<script type="module" src="library.js"></script>

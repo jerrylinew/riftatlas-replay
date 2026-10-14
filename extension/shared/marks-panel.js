@@ -57,10 +57,20 @@
    *   onSave(seq, text)    a note was written or changed; may return a promise
    *   onDelete(seq)        a mark was removed
    *   onTyping(on)         a note is being typed, or no longer is
+   *
+   * The library shows the same list in a page of its own, so it can turn off
+   * what only makes sense beside a replay - the add button, the key hints, the
+   * close button - and have it fill its column (`wide`). `jumpTitle` says what
+   * picking a mark does there.
    */
-  function create({ onClose, onJump, onAdd, onSave, onDelete, onTyping }) {
+  function create({
+    onClose, onJump, onAdd, onSave, onDelete, onTyping,
+    wide = false, addButton = true, keysHint = true, closeButton = true,
+    title = 'Marks', jumpTitle = 'Go to this step', emptyText = null,
+  }) {
     const element = document.createElement('div');
     element.style.cssText = 'all: initial; display: block;';
+    if (wide) element.classList.add('wide');
     const root = element.attachShadow({ mode: 'closed' });
     const style = el('style');
     style.textContent = CSS;
@@ -95,22 +105,25 @@
 
       rendering = true;
       for (const node of [...root.childNodes]) if (node !== style) node.remove();
-      const box = el('section', 'panel');
-      box.append(header());
+      const box = el('section', wide ? 'panel wide' : 'panel');
+      // A page that titles the list itself, and has no buttons for it, needs no header.
+      if (title || addButton || closeButton) box.append(header());
       if (error) box.append(el('p', 'error', error));
       if (!marks.length) {
-        box.append(el('p', 'empty',
-          'No marks yet. Press M, or ☆ on the bar, to mark the step you are on, and N to write a note there.'));
+        box.append(el('p', 'empty', emptyText
+          ?? 'No marks yet. Press M, or ☆ on the bar, to mark the step you are on, and N to write a note there.'));
       } else {
         const list = el('ul', 'list');
         for (const mark of marks) list.append(row(mark));
         box.append(list);
       }
-      const keys = el('p', 'keys');
-      for (const [k, what] of [['M', 'mark'], ['N', 'note'], [',', 'previous'], ['.', 'next']]) {
-        keys.append(el('kbd', null, k), ` ${what}  `);
+      if (keysHint) {
+        const keys = el('p', 'keys');
+        for (const [k, what] of [['M', 'mark'], ['N', 'note'], [',', 'previous'], ['.', 'next']]) {
+          keys.append(el('kbd', null, k), ` ${what}  `);
+        }
+        box.append(keys);
       }
-      box.append(keys);
       root.append(box);
 
       const list = root.querySelector('.list');
@@ -130,14 +143,18 @@
 
     function header() {
       const head = el('header');
-      const title = el('h2', null, 'Marks');
-      if (marks.length) title.append(el('span', 'count', String(marks.length)));
-      const here = markAt(current);
-      const add = el('button', 'add', here ? 'Note this step' : 'Mark this step');
-      add.type = 'button';
-      add.title = here ? 'Write a note on the step you are on (N)' : 'Mark the step you are on (M)';
-      add.onclick = () => (here ? edit(current) : onAdd?.());
-      head.append(title, add, iconButton(CLOSE, 'Close', () => { stopEditing(); onClose?.(); }));
+      const heading = el('h2', null, title);
+      if (marks.length) heading.append(el('span', 'count', String(marks.length)));
+      head.append(heading);
+      if (addButton) {
+        const here = markAt(current);
+        const add = el('button', 'add', here ? 'Note this step' : 'Mark this step');
+        add.type = 'button';
+        add.title = here ? 'Write a note on the step you are on (N)' : 'Mark the step you are on (M)';
+        add.onclick = () => (here ? edit(current) : onAdd?.());
+        head.append(add);
+      }
+      if (closeButton) head.append(iconButton(CLOSE, 'Close', () => { stopEditing(); onClose?.(); }));
       return head;
     }
 
@@ -148,7 +165,7 @@
 
       const go = el('button', 'go');
       go.type = 'button';
-      go.title = 'Go to this step';
+      go.title = jumpTitle;
       const top = el('span', 'top');
       top.append(el('span', 'star', '★'),
         el('span', 'seq', last != null ? `${mark.sequence}/${last}` : String(mark.sequence)));
@@ -302,6 +319,9 @@
       display: flex; flex-direction: column; background: #0b1017; border: 1px solid #24313f;
       border-radius: 10px; padding: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.55); color: #dbe7f3;
       font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif; text-align: left; }
+    .panel.wide { width: 100%; max-height: none; box-shadow: none; background: transparent;
+      border: 0; padding: 0; }
+    .panel.wide .list { overflow: visible; }
     header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
     h2 { flex: 1; margin: 0; font-size: 13px; font-weight: 600; color: #d8b76e; letter-spacing: .02em;
       display: flex; align-items: center; gap: 6px; }

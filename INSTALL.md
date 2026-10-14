@@ -120,6 +120,23 @@ them is where they will be next time.
 Playback runs about a second a move, but skips quickly through repeated actions
 — four rune exhausts in a row don't cost four seconds. Drag the slider to scrub.
 
+### The library
+
+Press **Library** in the popup for every game in one page: best-of-three games
+grouped together with the series score, and for the game you pick:
+
+- the result, the score, who went first, and the battlefield each of you picked
+- your **mulligan** — your opening hand with what you sent back crossed out, and
+  what you drew. For your opponent, only how many they sent back: their hand
+  was hidden from you, so the recording never had it
+- your **sideboarding** — what you brought in and took out since the previous
+  game of the series, and compared with the deck you registered
+- your **marks and notes**. Click one to watch the replay from that step (keep a
+  `play.riftatlas.com` tab open), and edit or delete notes right there
+
+Search finds games by opponent, legend, room code, or words in your notes. The
+up and down arrows move through the list.
+
 ### Adding a replay file to your list
 
 Press **Import** in the popup, then pick a `.ratlas.json` — one you exported, or

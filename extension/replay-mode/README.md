@@ -194,6 +194,10 @@ the reveals panel is:
 
 M never deletes a note: on a mark with words in it, it opens the note instead.
 
+The library opens a replay at a mark: `replayMode` takes a `startSequence`,
+which travels with the replay (`pendingStartSequence`, then arm.js) and puts the
+cursor on the first state at or after it before the client asks for one.
+
 A note is typed inside a closed shadow root, where a keystroke looks to the
 page like one on a plain element - so Space would play and the arrows would
 step. The overlay stops those keys at the window before anyone else sees them

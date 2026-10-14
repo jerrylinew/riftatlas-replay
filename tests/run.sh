@@ -59,6 +59,10 @@ echo "== importing a replay file into the list =="
 node "$ROOT/tests/replay-import.mjs"
 
 echo
+echo "== the library: mulligans, sideboarding, marks =="
+node "$ROOT/tests/game-summary.mjs"
+
+echo
 echo "== the detector must not fire before the real ending =="
 node --input-type=module -e "
 import fs from 'node:fs';

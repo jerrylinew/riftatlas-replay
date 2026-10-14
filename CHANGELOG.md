@@ -14,6 +14,11 @@ for the "What's new" block in the listing description.
   Export, so whoever you send the file to sees them in the standalone player's
   new Marks tab. The popup shows how many marks a recording has, and search
   finds words in your notes.
+- **Library.** A new page, from the popup's Library button, with every game:
+  best-of-threes grouped with their series score, each game's result, who went
+  first and the battlefield each player picked, your mulligan card by card (and your opponent's as a count), your
+  sideboarding since the previous game and against your registered deck, and your marks and notes — which
+  can be edited there, and clicked to watch the replay from that step.
 - **Import a replay file.** Press Import in the popup and pick a `.ratlas.json`
   — your own export, or one someone sent you. It joins your recordings, ready
   for Watch replay and for marking up, with any marks it came with. The player

@@ -11,6 +11,7 @@ import { SESSIONS, COMMITS, EXTRAS, REPLAYS, all, get, put, del, dropRecording, 
 import { extractReveals, revealsFromReplay } from '../shared/reveals.js';
 import { normaliseMark, cleanMarks, withMarks } from '../shared/marks.js';
 import { prepareImport } from '../shared/replay-import.js';
+import { summarise } from '../shared/game-summary.js';
 
 /**
  * Build a data: URL for a download. Chunked, because spreading a large array
@@ -75,7 +76,8 @@ async function unregisterArmingScripts() {
 // Never carry an arming registration across a browser restart.
 chrome.runtime.onStartup.addListener(() => {
   unregisterArmingScripts();
-  chrome.storage.session.remove(['pendingReplay', 'pendingReveals']).catch(() => {});
+  chrome.storage.session.remove(['pendingReplay', 'pendingReveals', 'pendingRecordingId',
+    'pendingStartSequence']).catch(() => {});
 });
 
 /**
@@ -321,6 +323,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             unanchored: replay?.coverage?.unanchored ?? null,
             match: replay?.match ?? null,
             players: replay?.players ?? null,
+            // Which best-of-three this game belongs to, so the library can group them.
+            series: replay?.shell?.seriesId
+              ? { id: replay.shell.seriesId, game: replay.shell.gameNumber ?? null } : null,
             viewerPlayerId: replay?.viewer?.playerId ?? null,
             buildError: s.buildError ?? null,
             stoppedEarly: replay?.coverage?.stoppedAt ?? null,
@@ -443,8 +448,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       let reveals = [];
       try { reveals = revealsFromReplay(row.replay); } catch { /* the replay still plays */ }
       // The recording id too, which is what its marks are kept under.
+      // And where to start: the library opens a replay at a mark.
       await chrome.storage.session.set({
         pendingReplay: row.replay, pendingReveals: reveals, pendingRecordingId: msg.roomCode,
+        pendingStartSequence: Number.isInteger(msg.startSequence) ? msg.startSequence : null,
       });
       await registerArmingScripts();
       await chrome.tabs.update(tab.id, { active: true, url: 'https://play.riftatlas.com/game' });
@@ -510,6 +517,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const url = chrome.runtime.getURL('player/player.html') + (msg.import ? '#import' : '');
     chrome.tabs.create({ url });
     return false;
+  }
+
+  if (msg?.type === 'openLibrary') {
+    chrome.tabs.create({ url: chrome.runtime.getURL('library/library.html') });
+    return false;
+  }
+
+  if (msg?.type === 'summary') {
+    // One game, read for the library: mulligans, sideboarding, and where each
+    // mark falls. Worked out on asking - a few hundred milliseconds a game -
+    // rather than kept, so it can never disagree with the replay.
+    (async () => {
+      const row = await get(REPLAYS, msg.recordingId);
+      if (!row) return sendResponse({ ok: false, error: 'This match has no replay yet.' });
+      const summary = summarise(row.replay, await marksFor(msg.recordingId));
+      sendResponse({ ok: true, summary: { ...summary, recordingId: msg.recordingId } });
+    })().catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
   }
 
   if (msg?.type === 'importReplay') {

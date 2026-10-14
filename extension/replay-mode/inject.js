@@ -38,7 +38,11 @@
       if (event.source !== window) return;
       if (event.data?.source !== 'riftatlas-replay-arm' || !event.data.replay) return;
       window.removeEventListener('message', onArm);
-      begin(event.data.replay, { reveals: event.data.reveals, recordingId: event.data.recordingId });
+      begin(event.data.replay, {
+        reveals: event.data.reveals,
+        recordingId: event.data.recordingId,
+        startSequence: event.data.startSequence,
+      });
     };
     window.addEventListener('message', onArm);
     // Tell arm.js we are listening, in case it ran first.
@@ -159,7 +163,9 @@ function begin(replay, ARM) {
     order.sort((a, b) => a - b);
   })();
 
-  let cursor = 0;
+  // Opened at a mark from the library: start on it, not at the beginning.
+  let cursor = Number.isInteger(ARM.startSequence)
+    ? Math.max(0, order.findIndex((q) => q >= ARM.startSequence)) : 0;
   /**
    * The client discards a snapshot whose sequence is not newer than what it
    * already has, so seeking backwards is ignored if we send the replay's own

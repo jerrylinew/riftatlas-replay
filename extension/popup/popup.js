@@ -19,6 +19,7 @@ overlayToggle.onchange = () => {
 };
 
 document.getElementById('open-player').onclick = () => send({ type: 'openPlayer' });
+document.getElementById('library').onclick = () => send({ type: 'openLibrary' });
 document.getElementById('import').onclick = () => send({ type: 'openPlayer', import: true });
 
 document.getElementById('unstick').onclick = async (e) => {

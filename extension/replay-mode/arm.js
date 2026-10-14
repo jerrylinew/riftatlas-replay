@@ -17,18 +17,20 @@
 const KEY = 'pendingReplay';
 const REVEALS = 'pendingReveals';
 const RECORDING = 'pendingRecordingId';
+const START = 'pendingStartSequence';
 
-chrome.storage.session.get([KEY, REVEALS, RECORDING]).then((stored) => {
+chrome.storage.session.get([KEY, REVEALS, RECORDING, START]).then((stored) => {
   const pending = stored?.[KEY];
   if (!pending) return;
   const reveals = stored?.[REVEALS] ?? [];
   const recordingId = stored?.[RECORDING] ?? pending.recordingId ?? null;
+  const startSequence = stored?.[START] ?? null;
   // Consume it: one arming per request.
-  chrome.storage.session.remove([KEY, REVEALS, RECORDING]);
+  chrome.storage.session.remove([KEY, REVEALS, RECORDING, START]);
   chrome.runtime.sendMessage({ type: 'replayModeArmed' }).catch(() => {});
 
   const hand = () => window.postMessage(
-    { source: 'riftatlas-replay-arm', replay: pending, reveals, recordingId }, window.location.origin);
+    { source: 'riftatlas-replay-arm', replay: pending, reveals, recordingId, startSequence }, window.location.origin);
 
   // Both scripts run at document_start and the order is not guaranteed, so
   // answer inject.js's ready call, and also offer it straight away in case it

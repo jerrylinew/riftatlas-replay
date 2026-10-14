@@ -40,7 +40,7 @@
     events: [],
     seenIds: new Set(),
     expanded: true,
-    panel: false,             // the reveals list is open
+    panel: false,             // which list is open: 'reveals', 'marks', or none
     position: null,           // centre of the icon, in viewport px; null = default corner
     catalog: new Map(),
     revisions: new Map(),     // card code -> the version tag on its image
@@ -69,7 +69,12 @@
       const room = roomOf(msg.url);
       if (!room) return;
       state.socketRooms.set(msg.socketId, room);
-      if (state.room !== room) { state.room = room; state.events = []; }
+      if (state.room !== room) {
+        state.room = room;
+        state.events = [];
+        Object.assign(live, { sequence: null, turn: null, lastText: null, marks: [], labels: {} });
+        loadLiveMarks();
+      }
       scheduleRefresh();
       render();
     } else if (msg.kind === 'close') {
@@ -81,6 +86,7 @@
       }
     } else if (msg.kind === 'frame' && typeof msg.data === 'string'
       && msg.data.includes('"authoritative_')) {
+      if (state.socketRooms.get(msg.socketId) === state.room) followMatch(msg.data);
       scheduleRefresh();
     }
   });
@@ -105,7 +111,7 @@
       // panel's scroll under the reader's thumb.
       if (JSON.stringify(events) === JSON.stringify(state.events)) return;
       state.events = events;
-      if (state.panel) markSeen();
+      if (state.panel === 'reveals') markSeen();
       render();
     } catch { /* the worker is waking up; the next frame asks again */ }
   }
@@ -141,7 +147,7 @@
   let dragging = false;   // a redraw mid-drag would drop the pointer
   let reveals = null;     // the shared panel, made once and moved into place
 
-  const closePanel = () => { state.panel = false; reveals?.reset(); render(); };
+  const closePanel = () => { state.panel = false; reveals?.reset(); live.panel?.reset(); render(); };
 
   function mount() {
     if (host) return true;
@@ -211,6 +217,9 @@
 
   function render() {
     if (dragging) return;
+    // A redraw moves the panel, which takes the cursor out of a note being
+    // written and saves it half-finished. Redraw once the note is put down.
+    if (live.panel?.isTyping()) { live.pendingRender = true; return; }
     const show = state.enabled && !!state.room;
     if (!show) { if (host) host.style.display = 'none'; return; }
     if (!mount()) { document.addEventListener('DOMContentLoaded', render, { once: true }); return; }
@@ -225,12 +234,15 @@
 
     const bar = el('div', 'bar');
     bar.append(logoButton());
-    if (state.expanded) bar.append(eyeButton());
+    if (state.expanded) bar.append(eyeButton(), markButton());
     frame.append(bar);
 
-    if (state.expanded && state.panel) {
+    if (state.expanded && state.panel === 'reveals') {
       reveals.update(state.events, state.catalog, state.revisions);
       frame.append(reveals.element);
+    } else if (state.expanded && state.panel === 'marks') {
+      frame.append(livePanel().element);
+      paintLive();
     }
     root.append(frame);
   }
@@ -293,21 +305,191 @@
   }
 
   function eyeButton() {
-    const button = el('button', `tool${state.panel ? ' on' : ''}`);
+    const open = state.panel === 'reveals';
+    const button = el('button', `tool${open ? ' on' : ''}`);
     button.title = 'Cards your opponent revealed, then hid again';
     button.setAttribute('aria-label', 'Revealed cards');
-    button.setAttribute('aria-pressed', String(state.panel));
+    button.setAttribute('aria-pressed', String(open));
     button.append(svg(globalThis.riftatlasRevealPanel.EYE));
     const fresh = unseen();
     if (fresh) button.append(el('span', 'badge', String(fresh)));
     button.onclick = () => {
-      if (state.panel) { closePanel(); return; }
-      state.panel = true;
+      if (open) { closePanel(); return; }
+      live.panel?.reset();
+      state.panel = 'reveals';
       markSeen();
       render();
     };
     return button;
   }
+
+  // ── Marking during the match ─────────────────────────────────────────────
+  // A mark is a step to come back to in the replay, with a note if there is
+  // something to say. The step is the last one the server sent - what the
+  // board is showing - so the mark lands exactly there when the replay is
+  // watched. Marks go into the recording through the worker, like those made
+  // in replay mode, and show there tagged "live".
+
+  const STAR = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>';
+  const live = {
+    sequence: null,    // the step the board is on
+    turn: null,
+    lastText: null,    // the last thing the game's log said
+    marks: [],
+    labels: {},        // sequence -> what was happening when it was marked
+    panel: null,
+    pendingRender: false,
+  };
+
+  /** Keep up with the match from the frames already passing by. */
+  function followMatch(data) {
+    let msg;
+    try { msg = JSON.parse(data); } catch { return; }
+    if (msg.type === 'authoritative_snapshot') {
+      live.turn = msg.snapshot?.turnNumber ?? live.turn;
+      live.lastText = msg.gameplayLog?.[0]?.text ?? live.lastText;
+    } else if (msg.type === 'authoritative_patch_commit') {
+      for (const op of msg.patch?.operations ?? []) {
+        if (op.op === 'set_room_fields' && op.fields?.turnNumber != null) live.turn = op.fields.turnNumber;
+        if (op.op === 'log_insert' && op.entries?.[0]?.text) live.lastText = op.entries[0].text;
+      }
+    } else {
+      return;
+    }
+    if (Number.isInteger(msg.sequence)) live.sequence = msg.sequence;
+    if (state.panel === 'marks') paintLive();
+  }
+
+  async function liveCall(message) {
+    if (!chrome.runtime?.id) throw new Error('The extension was updated or reloaded. Reload this page to keep marking.');
+    const res = await chrome.runtime.sendMessage({ room: state.room, ...message });
+    if (!res?.ok) throw new Error(res?.error ?? 'Could not save the mark.');
+    return res;
+  }
+
+  async function loadLiveMarks() {
+    if (!state.room) return;
+    try {
+      live.marks = (await liveCall({ type: 'marks' })).marks ?? [];
+      paintLive();
+      render();
+    } catch { /* not recorded yet; the first mark tries again */ }
+  }
+
+  /** Run a change and show the list it left, or say why it failed. */
+  async function changeLive(message) {
+    try {
+      live.marks = (await liveCall(message)).marks ?? [];
+      paintLive();
+      render();
+      return true;
+    } catch (e) {
+      toast(e.message, true);
+      return false;
+    }
+  }
+
+  /** Mark the step the board is on; with `note`, open its note as well. */
+  async function markNow({ note = false } = {}) {
+    if (!state.room) {
+      toast(document.getElementById('riftatlas-replay-bar')
+        ? 'In a replay, press M to mark a step and N to write a note.'
+        : 'Marks are for a match in progress — start one first.', true);
+      return;
+    }
+    const sequence = live.sequence;
+    if (!Number.isInteger(sequence)) { toast('Nothing to mark yet — the match has not started.', true); return; }
+    live.labels[sequence] = { turn: live.turn, text: live.lastText };
+    const already = live.marks.some((m) => m.sequence === sequence);
+    if (!already && !(await changeLive({ type: 'saveMark', sequence, source: 'live' }))) return;
+    if (note) {
+      if (!state.enabled) {
+        toast(`★ Marked step ${sequence}. Turn on the in-game overlay in the popup to write notes during a match.`);
+        return;
+      }
+      state.expanded = true;
+      state.panel = 'marks';
+      render();
+      live.panel.edit(sequence);
+    } else {
+      toast(already ? `Step ${sequence} is already marked.`
+        : `★ Marked step ${sequence}${live.turn != null ? ` · turn ${live.turn}` : ''}`);
+    }
+  }
+
+  function livePanel() {
+    if (live.panel) return live.panel;
+    live.panel = globalThis.riftatlasMarksPanel.create({
+      title: 'Marks this match',
+      keysHint: false,
+      jumpTitle: 'Marked during this match. Watch the replay afterwards to see it.',
+      emptyText: 'Nothing marked yet. Mark the step you are on to come back to it in the replay. '
+        + 'Alt+Shift+M marks from anywhere; Alt+Shift+W marks and opens a note.',
+      onClose: closePanel,
+      onAdd: () => markNow(),
+      onSave: (sequence, text) => changeLive({ type: 'saveMark', sequence, text, source: 'live' }),
+      onDelete: (sequence) => changeLive({ type: 'deleteMark', sequence }),
+      onTyping: (on) => {
+        if (on || !live.pendingRender) return;
+        live.pendingRender = false;
+        // After the blur that ended the typing has been handled.
+        setTimeout(render, 0);
+      },
+    });
+    return live.panel;
+  }
+
+  function paintLive() {
+    live.panel?.update({ marks: live.marks, current: live.sequence, last: null, labels: live.labels });
+  }
+
+  function markButton() {
+    const open = state.panel === 'marks';
+    const button = el('button', `tool${open ? ' on' : ''}`);
+    button.title = 'Mark this moment to review in the replay (Alt+Shift+M; Alt+Shift+W with a note)';
+    button.setAttribute('aria-label', 'Marks this match');
+    button.setAttribute('aria-pressed', String(open));
+    button.append(svg(STAR));
+    if (live.marks.length) button.append(el('span', 'badge gold', String(live.marks.length)));
+    button.onclick = () => {
+      if (open) { closePanel(); return; }
+      reveals?.reset();
+      state.panel = 'marks';
+      render();
+    };
+    return button;
+  }
+
+  // A word that something happened, for a mark made by shortcut with the
+  // panel shut or the overlay off. Its own host, so it shows either way.
+  let toastHost = null;
+  let toastTimer = null;
+  function toast(text, bad = false) {
+    if (!document.body) return;
+    if (!toastHost) {
+      toastHost = document.createElement('div');
+      toastHost.id = 'riftatlas-replay-toast';
+      toastHost.style.cssText = 'all: initial; position: fixed; z-index: 2147483647; left: 50%; '
+        + 'top: 18px; transform: translateX(-50%); pointer-events: none;';
+      toastHost.attachShadow({ mode: 'open' }).innerHTML = `<style>
+        div { font: 600 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif; color: #dbe7f3;
+          background: rgba(11,16,23,.95); border: 1px solid #d8b76e; border-radius: 8px; padding: 8px 14px;
+          box-shadow: 0 8px 24px rgba(0,0,0,.5); max-width: min(520px, 90vw); }
+        div.bad { border-color: #ff9d6b; color: #ffcfb8; }
+      </style><div></div>`;
+    }
+    const box = toastHost.shadowRoot.querySelector('div');
+    box.textContent = text;
+    box.className = bad ? 'bad' : '';
+    if (!toastHost.isConnected) document.body.append(toastHost);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastHost.remove(), bad ? 4000 : 2200);
+  }
+
+  // The browser's own shortcuts arrive through the worker.
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.type === 'liveMark') markNow({ note: msg.note === true });
+  });
 
   // ── Replay mode's panel ──────────────────────────────────────────────────
   // Replay mode says which reveals are listed at the scrubber's position and
@@ -484,14 +666,18 @@
   // While a note is being written, its keys are the note's. RiftAtlas' client
   // and replay mode both listen for keys on the window, and from outside a
   // closed shadow root a keystroke in the note looks like one on the page - so
-  // Space would play the replay and the arrows would step it. Content scripts
-  // run before the page's own, so this sees every key first. Escape and
-  // Ctrl+Enter are let through: the note itself answers those.
+  // Space would play the replay, the arrows would step it, and in a match the
+  // game's own shortcuts would fire. Content scripts run before the page's
+  // own, so this sees every key first and keeps all of them from the page.
+  // The two keys the note answers to are answered here, for the same reason.
   for (const type of ['keydown', 'keyup', 'keypress']) {
     window.addEventListener(type, (e) => {
-      if (!marks.panel?.isTyping()) return;
-      if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) return;
+      const panel = live.panel?.isTyping() ? live.panel : marks.panel?.isTyping() ? marks.panel : null;
+      if (!panel) return;
       e.stopImmediatePropagation();
+      if (type !== 'keydown') return;
+      if (e.key === 'Escape') { e.preventDefault(); panel.cancel(); }
+      else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); panel.save(); }
     }, true);
   }
 
@@ -523,6 +709,7 @@
     .badge { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px;
       border-radius: 9px; background: #74efff; color: #0b1017; font-size: 10.5px; font-weight: 700;
       line-height: 17px; text-align: center; }
+    .badge.gold { background: #d8b76e; }
     .svg { display: grid; place-items: center; }
   `;
 })();

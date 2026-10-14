@@ -431,6 +431,25 @@ async function refresh() {
   }
 }
 
+$('#export-all').onclick = async () => {
+  const button = $('#export-all');
+  const status = $('#export-status');
+  button.disabled = true;
+  status.className = '';
+  status.textContent = 'Zipping every game…';
+  const res = await send({ type: 'exportAll' });
+  button.disabled = false;
+  if (res?.ok) {
+    status.textContent = `Saved ${res.count} game${res.count === 1 ? '' : 's'}`
+      + (res.skipped ? ` — ${res.skipped} could not be built and were left out` : '') + '.';
+  } else if (/cancel/i.test(res?.error ?? '')) {
+    status.textContent = '';
+  } else {
+    status.className = 'bad';
+    status.textContent = res?.error ?? 'Export failed.';
+  }
+};
+
 $('#search').addEventListener('input', renderList);
 $('#search').addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && $('#search').value) { $('#search').value = ''; renderList(); }

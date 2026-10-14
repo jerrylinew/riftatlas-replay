@@ -79,6 +79,11 @@ Under the player names are three small ones:
 
 **Copy** beside the room code copies it.
 
+**Export all**, under the overlay switch (and at the top of the library), saves
+every match as one `.zip` — a `.ratlas.json` for each, marks and notes included,
+exactly as Export would save them one at a time. It is the way to back up your
+history, or to move it to another browser with Import.
+
 Once you have a few matches, a search box appears. It matches room codes,
 either player, either legend, the format, and the date — so `zed`, `bertoc`,
 `bo3` and `sep` all work, and several terms narrow rather than widen
@@ -171,6 +176,28 @@ them, so someone you send the file to sees your marks and notes in the
 standalone player under its **Marks** tab — they can't change them. The popup
 shows ★ and a count on any recording with marks, and searching finds words in
 your notes.
+
+### Marking during a match
+
+Not sure about a play while you're making it? Mark it, keep playing, and look
+at it properly in the replay afterwards.
+
+| Shortcut | Does |
+|---|---|
+| Alt+Shift+M | mark the step the board is on |
+| Alt+Shift+W | mark it and open a note on it |
+
+These are the browser's own shortcuts, so they never reach the game. Change
+them at `chrome://extensions/shortcuts` if they clash with something. (W, for
+*write*, because Chrome keeps Alt+Shift+N for its split view, and Chrome's own
+shortcuts win over an extension's.)
+Alt+Shift+M works whether or not the in-game overlay is on — a short message at
+the top of the screen confirms the mark. With the overlay on, its ☆ button
+lists this match's marks, with a button to mark the step you're on and the
+notes to edit; while you type a note, nothing you press reaches the game.
+
+Marks made during a match are tagged *live* in the replay, the library and the
+player, and work like any other mark.
 
 ## What it does with your data
 

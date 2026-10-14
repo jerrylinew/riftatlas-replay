@@ -14,6 +14,14 @@ for the "What's new" block in the listing description.
   Export, so whoever you send the file to sees them in the standalone player's
   new Marks tab. The popup shows how many marks a recording has, and search
   finds words in your notes.
+- **Export all.** One button, in the popup and the library, saves every match
+  as a single `.zip` of `.ratlas.json` files with their marks and notes — a
+  backup of your whole history.
+- **Mark moments during a match.** Alt+Shift+M marks the step the board is
+  on, and Alt+Shift+W marks it and opens a note, without the keys ever reaching
+  the game. With the in-game overlay on, a ☆ button lists the match's marks and
+  notes. They turn up in the replay, tagged *live*, so you can come back to a
+  play you weren't sure of.
 - **Library.** A new page, from the popup's Library button, with every game:
   best-of-threes grouped with their series score, each game's result, who went
   first and the battlefield each player picked, your mulligan card by card (and your opponent's as a count), your

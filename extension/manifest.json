@@ -32,6 +32,16 @@
       "128": "icons/icon128.png"
     }
   },
+  "commands": {
+    "mark-step": {
+      "suggested_key": { "default": "Alt+Shift+M" },
+      "description": "Mark the step you are on in a match"
+    },
+    "note-step": {
+      "suggested_key": { "default": "Alt+Shift+W" },
+      "description": "Mark the step you are on in a match, and write a note on it"
+    }
+  },
   "content_scripts": [
     {
       "matches": [

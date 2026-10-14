@@ -63,6 +63,10 @@ echo "== the library: mulligans, sideboarding, marks =="
 node "$ROOT/tests/game-summary.mjs"
 
 echo
+echo "== export all: the .zip reads back =="
+node "$ROOT/tests/zip.mjs"
+
+echo
 echo "== the detector must not fire before the real ending =="
 node --input-type=module -e "
 import fs from 'node:fs';

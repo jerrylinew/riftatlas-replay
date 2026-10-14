@@ -305,6 +305,10 @@
       edit,
       /** Close any open note, saving it, as when the panel is put away. */
       reset() { commit(); confirming = null; render(); },
+      /** Save the open note (Ctrl+Enter), for a caller that takes the keys first. */
+      save() { commit(); },
+      /** Close the open note without saving (Escape). */
+      cancel() { stopEditing(); render(); },
       isTyping,
     };
   }

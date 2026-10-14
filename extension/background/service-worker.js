@@ -12,6 +12,7 @@ import { extractReveals, revealsFromReplay } from '../shared/reveals.js';
 import { normaliseMark, cleanMarks, withMarks } from '../shared/marks.js';
 import { prepareImport } from '../shared/replay-import.js';
 import { summarise } from '../shared/game-summary.js';
+import { zip } from '../shared/zip.js';
 
 /**
  * Build a data: URL for a download. Chunked, because spreading a large array
@@ -19,12 +20,59 @@ import { summarise } from '../shared/game-summary.js';
  * first export silently did nothing at all.
  */
 function jsonDataUrl(value) {
-  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  return bytesDataUrl(new TextEncoder().encode(JSON.stringify(value)), 'application/json');
+}
+
+function bytesDataUrl(bytes, type) {
   let binary = '';
   for (let i = 0; i < bytes.length; i += 0x8000) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   }
-  return 'data:application/json;base64,' + btoa(binary);
+  return `data:${type};base64,` + btoa(binary);
+}
+
+/**
+ * Every replay as one .zip, each file exactly what Export would save for it -
+ * marks included. A replay that has fallen behind its recording is rebuilt
+ * first, as Export does; one that will not build is left out and counted.
+ */
+async function exportAll() {
+  const sessions = (await all(SESSIONS)).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+  const counts = new Map();
+  for (const c of await all(COMMITS)) counts.set(c.roomCode, (counts.get(c.roomCode) ?? 0) + 1);
+  const files = [];
+  let skipped = 0;
+  for (const s of sessions) {
+    const recorded = counts.get(s.roomCode) ?? 0;
+    if (!s.imported && isEmptyRecording(s, recorded)) continue;
+    let row = await get(REPLAYS, s.roomCode);
+    const behind = !row || (row.replay.commits.length < recorded && !row.replay.coverage?.unanchored);
+    if (behind && !s.imported) {
+      await finalise(s.roomCode, { close: false });
+      row = await get(REPLAYS, s.roomCode);
+    }
+    if (!row) { skipped++; continue; }
+    const replay = withMarks(row.replay, await marksFor(s.roomCode));
+    files.push({
+      // Recording ids are a room code and a time; keep them safe as file names anyway.
+      name: `${s.roomCode.replace(/[\\/:*?"<>|]/g, '_')}.ratlas.json`,
+      data: JSON.stringify(replay),
+      date: new Date(replay.match?.capturedAt ?? s.startedAt ?? Date.now()),
+    });
+  }
+  return { files, skipped };
+}
+
+/**
+ * Which recording a mark is for. Replay mode and the library name it; the
+ * in-game overlay knows only the room it is playing in, which is resolved
+ * the way the recorder resolves a frame - so a mark lands in the same
+ * recording as the moves around it.
+ */
+async function markTarget(msg) {
+  if (msg.recordingId) return msg.recordingId;
+  if (msg.room) return (await activeRecordingFor(msg.room))?.roomCode ?? null;
+  return null;
 }
 
 /** One recording's marks, in match order, as exported. */
@@ -72,6 +120,15 @@ async function unregisterArmingScripts() {
     }
   } catch { /* nothing registered */ }
 }
+
+// The shortcuts for marking during a match. They are the browser's own, so a
+// keystroke never reaches RiftAtlas' page; the tab's overlay knows the room
+// and the step, and does the marking.
+chrome.commands?.onCommand.addListener((command, tab) => {
+  if (command !== 'mark-step' && command !== 'note-step') return;
+  if (!tab?.id || !/^https:\/\/play\.riftatlas\.com\//.test(tab.url ?? '')) return;
+  chrome.tabs.sendMessage(tab.id, { type: 'liveMark', note: command === 'note-step' }).catch(() => {});
+});
 
 // Never carry an arming registration across a browser restart.
 chrome.runtime.onStartup.addListener(() => {
@@ -361,17 +418,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg?.type === 'marks') {
-    marksFor(msg.recordingId)
-      .then((marks) => sendResponse({ ok: true, marks }))
+    markTarget(msg)
+      .then(async (id) => sendResponse({ ok: true, recordingId: id, marks: await marksFor(id) }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
 
   if (msg?.type === 'saveMark') {
     (async () => {
-      const id = msg.recordingId;
+      const id = await markTarget(msg);
       if (!id || !(await get(SESSIONS, id))) {
-        return sendResponse({ ok: false, error: 'that recording is no longer here' });
+        return sendResponse({ ok: false, error: msg.room
+          ? 'This match is not being recorded yet.' : 'That recording is no longer here.' });
       }
       const key = String(msg.sequence);
       const before = await get(EXTRAS, [id, 'mark', key]);
@@ -391,8 +449,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg?.type === 'deleteMark') {
     (async () => {
-      await del(EXTRAS, [msg.recordingId, 'mark', String(msg.sequence)]);
-      sendResponse({ ok: true, marks: await marksFor(msg.recordingId) });
+      const id = await markTarget(msg);
+      await del(EXTRAS, [id, 'mark', String(msg.sequence)]);
+      sendResponse({ ok: true, marks: await marksFor(id) });
     })().catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
@@ -414,6 +473,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         () => sendResponse({ ok: !chrome.runtime.lastError, error: chrome.runtime.lastError?.message }));
       return;
     })();
+    return true;
+  }
+
+  if (msg?.type === 'exportAll') {
+    (async () => {
+      const { files, skipped } = await exportAll();
+      if (!files.length) return sendResponse({ ok: false, error: 'No replays to export yet.' });
+      const bytes = await zip(files);
+      const day = new Date().toISOString().slice(0, 10);
+      chrome.downloads.download({
+        url: bytesDataUrl(bytes, 'application/zip'),
+        filename: `riftatlas-replays-${day}.zip`,
+        saveAs: true,
+      }, () => sendResponse({
+        ok: !chrome.runtime.lastError,
+        error: chrome.runtime.lastError?.message,
+        count: files.length,
+        skipped,
+      }));
+    })().catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
 

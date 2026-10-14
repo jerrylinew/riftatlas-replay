@@ -31,6 +31,19 @@ document.getElementById('unstick').onclick = async (e) => {
   setTimeout(() => { button.textContent = was; }, 2500);
 };
 
+document.getElementById('export-all').onclick = async (e) => {
+  const button = e.currentTarget;
+  const was = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Zipping…';
+  const res = await send({ type: 'exportAll' });
+  button.disabled = false;
+  button.textContent = res?.ok
+    ? `Saved ${res.count}${res.skipped ? ` (${res.skipped} could not build)` : ''}`
+    : /cancel/i.test(res?.error ?? '') ? was : (res?.error ?? 'failed');
+  setTimeout(() => { button.textContent = was; }, 3000);
+};
+
 document.getElementById('dump').onclick = async (e) => {
   const button = e.currentTarget;
   const was = button.textContent;

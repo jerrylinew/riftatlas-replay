@@ -186,6 +186,11 @@ function begin(replay, ARM) {
     const shell = clone(replay.shell ?? {});
     shell.viewer = { role: 'spectator', playerId: socket._viewerId ?? null };
     shell.canReturnToLobby = true;
+    // Recordings made before the recorder replaced a lobby header still carry
+    // one. Told it is a lobby awaiting a manual start, the client never shows
+    // the board, so take the phase from the game itself.
+    shell.phase = replay.origin?.snapshot?.phase ?? shell.phase;
+    delete shell.manualStartRequired;
     delete shell.selfPlayer;
     shell.publicPlayers = (replay.players ?? []).map((p) => ({
       id: p.id, seat: p.seat, name: p.name, joinedAt: shell.createdAt ?? 0,

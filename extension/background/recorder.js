@@ -118,7 +118,7 @@ async function handleFrame({ data, at, socketId }) {
       break;
 
     case 'room_shell_sync': {
-      if (!session.shell) session.shell = msg.sessionDoc;
+      session.shell = keptShell(session.shell, msg.sessionDoc);
       session.viewer = msg.sessionDoc?.viewer ?? session.viewer;
       // Who the room currently considers gone. A match is over for our purposes
       // when nobody is left in it - a far steadier signal than reading the log.
@@ -172,6 +172,20 @@ export function isTerminalLogEntry(entry) {
   const text = entry.text ?? '';
   if (/initiative/i.test(text)) return false;   // the dice roll is not an ending
   return VICTORY_TEXT.test(text);
+}
+
+/**
+ * Which room header a recording keeps.
+ *
+ * The first one, since later ones can describe the room after the match -
+ * except a lobby header. A recording that starts before the opponent joins
+ * would otherwise replay as a lobby waiting for a manual start, with no
+ * players and no decklist, and the board would never appear.
+ */
+export function keptShell(current, incoming) {
+  if (!current) return incoming ?? null;
+  if (current.phase === 'lobby' && incoming && incoming.phase !== 'lobby') return incoming;
+  return current;
 }
 
 /**

@@ -4,6 +4,14 @@ What changed in each released version, in the words a player would use. The
 Chrome Web Store has no changelog field, so this is the record, and the source
 for the "What's new" block in the listing description.
 
+## Unreleased
+
+- **Replays of games that started recording in the lobby now play.** If the
+  extension began recording while you were waiting for your opponent, Watch
+  replay showed an empty lobby instead of the board. That is fixed for new
+  recordings and for ones you already have, and exports of those games now
+  include your decklist.
+
 ## 0.7.0
 
 - **In-game overlay.** Switch on *Enable In-Game Overlay* in the popup and a

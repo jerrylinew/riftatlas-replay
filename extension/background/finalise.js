@@ -242,7 +242,12 @@ export async function buildReplay(recordingId) {
 
   const players = (finalState.players ?? []).map((p) => ({
     id: p.id, seat: p.seat, name: p.name, legend: legendOf(p),
-    decklistRaw: p.id === selfPlayer.id ? (selfPlayer.decklistRaw ?? null) : null,
+    // A lobby header carries no deck; the opening snapshot does.
+    decklistRaw: p.id === (selfPlayer.id ?? viewer.playerId)
+      ? (selfPlayer.decklistRaw
+        ?? session.origin.snapshot.players?.find((x) => x.id === p.id)?.decklistRaw
+        ?? null)
+      : null,
     finalScore: p.board?.score ?? null,
     thinkTimeMs: totals[p.id] ?? null,
   }));
